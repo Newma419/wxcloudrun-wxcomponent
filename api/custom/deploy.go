@@ -5,7 +5,6 @@ import (
     "github.com/gin-gonic/gin"
     "github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
     "github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/wx"
-    wxbase "github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/wx/base"
 )
 
 // DeployRequest 定义部署请求的参数结构
