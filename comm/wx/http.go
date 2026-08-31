@@ -24,33 +24,36 @@ var WxJson = jsoniter.Config{
 	TagKey:                 "wx",
 }.Froze()
 
-// GetComponentWxApiUrl 拼接微信开放平台的url，带第三方token
 func GetComponentWxApiUrl(path string, query string) (string, error) {
-	if len(query) > 0 {
-		query = "&" + query
-	}
-	var protocol string
-	if config.WxApiConf.UseHttps {
-		protocol = "https"
-	} else {
-		protocol = "http"
-	}
-	url := fmt.Sprintf("%s://api.weixin.qq.com%s", protocol, path)
+    if len(query) > 0 {
+        query = "&" + query
+    }
+    var protocol string
+    if config.WxApiConf.UseHttps {
+        protocol = "https"
+    } else {
+        protocol = "http"
+    }
+    url := fmt.Sprintf("%s://api.weixin.qq.com%s", protocol, path)
 
-	if config.WxApiConf.UseCloudBaseAccessToken {
-		return fmt.Sprintf("%s?cloudbase_access_token=%s%s",
-			url, cloudbasetoken.GetCloudBaseAccessToken(), query), nil
-	}
-	if config.WxApiConf.UseComponentAccessToken {
-		token, err := GetComponentAccessToken()
-		if err != nil {
-			log.Error(err)
-			return "", err
-		}
-		return fmt.Sprintf("%s?component_access_token=%s%s",
-			url, token, query), nil
-	}
-	return fmt.Sprintf("%s?%s", url, query), nil
+    // 云调用模式：不携带任何 token 参数
+    if config.WxApiConf.UseCloudBaseAccessToken {
+        if query != "" {
+            return fmt.Sprintf("%s?%s", url, query), nil
+        }
+        return url, nil
+    }
+    
+    if config.WxApiConf.UseComponentAccessToken {
+        token, err := GetComponentAccessToken()
+        if err != nil {
+            log.Error(err)
+            return "", err
+        }
+        return fmt.Sprintf("%s?component_access_token=%s%s",
+            url, token, query), nil
+    }
+    return fmt.Sprintf("%s?%s", url, query), nil
 }
 
 // GetAuthorizerWxApiUrl 拼接微信开放平台的url，带小程序token
