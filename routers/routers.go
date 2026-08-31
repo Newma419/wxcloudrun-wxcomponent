@@ -3,6 +3,7 @@ package routers
 import (
 	"net/http"
 
+	"github.com/WeixinCloud/wxcloudrun-wxcomponent/api/custom"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/api/admin"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/api/authpage"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/api/innerservice"
@@ -35,6 +36,14 @@ func Init() *gin.Engine {
 	for _, opt := range options {
 		opt(g)
 	}
+
+	// ========== 新增：自定义路由组 ==========
+    // 用于内部调用，走云托管固定出口 IP
+    customGroup := r.Group("/custom")
+    {
+        customGroup.POST("/deploy", custom.DeployHandler)
+    }
+    // =====================================
 
 	// 静态文件
 	g.Static("/assets", "client/dist/wxcomponent/assets")
