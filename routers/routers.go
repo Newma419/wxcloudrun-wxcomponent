@@ -37,13 +37,29 @@ func Init() *gin.Engine {
 		opt(g)
 	}
 
-	// ========== 新增：自定义路由组 ==========
-    // 用于内部调用，走云托管固定出口 IP
-    customGroup := r.Group("/custom")
-    {
-        customGroup.POST("/deploy", custom.DeployHandler)
-    }
-    // =====================================
+	// ========== 自定义路由组 ==========
+	// 用于内部调用，走云托管固定出口 IP
+	customGroup := r.Group("/custom")
+	{
+		// 部署
+		customGroup.POST("/deploy", custom.DeployHandler)
+
+		// ============================================================
+		// 优惠券相关接口
+		// ============================================================
+		// 用户端
+		customGroup.GET("/coupon/list", custom.GetCouponList)                // 获取可领取券列表
+		customGroup.POST("/coupon/receive", custom.ReceiveCoupon)            // 领取优惠券
+		customGroup.GET("/coupon/user/list", custom.GetUserCoupons)          // 获取用户可用券
+		customGroup.POST("/coupon/available", custom.GetAvailableCoupons)    // 结算页筛选可用券
+		customGroup.POST("/coupon/use", custom.UseCoupon)                    // 核销优惠券
+
+		// 管理后台
+		customGroup.GET("/coupon/admin/list", custom.GetAdminCouponList)     // 管理后台券列表
+		customGroup.POST("/coupon/admin/save", custom.SaveCoupon)            // 创建/更新券
+		customGroup.POST("/coupon/admin/delete", custom.DeleteCoupon)        // 删除券
+	}
+	// =====================================
 
 	// 静态文件
 	g.Static("/assets", "client/dist/wxcomponent/assets")
