@@ -3,7 +3,6 @@ package custom
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
+	"gorm.io/gorm"
 )
 
 // ============================================================
@@ -57,7 +57,7 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	// 获取底层 *sql.DB 用于 QueryRow
+	// 获取底层 *sql.DB 用于原生查询
 	sqlDB, err := dbConn.DB()
 	if err != nil {
 		log.Errorf("获取数据库连接失败: %v", err)
@@ -92,7 +92,7 @@ func LoginByPhone(c *gin.Context) {
 	)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == gorm.ErrRecordNotFound {
 			// 3. 新用户，创建记录
 			openid := fmt.Sprintf("user_%d", time.Now().UnixNano())
 			result, err := sqlDB.Exec(`
@@ -177,18 +177,18 @@ func SetPassword(c *gin.Context) {
 	hashed := hashPassword(req.Password)
 
 	// 更新用户密码
-	result, err := dbConn.Exec(`
+	result := dbConn.Exec(`
 		UPDATE user SET password = ?, is_set_password = 1 
 		WHERE phoneNumber = ? OR username = ?
 	`, hashed, req.Phone, req.Phone)
-	if err != nil {
-		log.Errorf("更新密码失败: %v", err)
+
+	if result.Error != nil {
+		log.Errorf("更新密码失败: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		c.JSON(http.StatusOK, gin.H{"code": 404, "message": "用户不存在"})
 		return
 	}
@@ -201,7 +201,7 @@ func SetPassword(c *gin.Context) {
 		NickName    string  `json:"nickName"`
 		Balance     float64 `json:"balance"`
 	}
-	err = dbConn.Raw(`
+	err := dbConn.Raw(`
 		SELECT id, _openid, phoneNumber, nickName, balance 
 		FROM user WHERE phoneNumber = ? OR username = ?
 	`, req.Phone, req.Phone).Scan(&userInfo).Error
@@ -272,7 +272,7 @@ func CheckToken(c *gin.Context) {
 	)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"valid": false}})
 			return
 		}
@@ -388,12 +388,13 @@ func ResetPassword(c *gin.Context) {
 	hashed := hashPassword(req.Password)
 
 	// 更新密码
-	_, err := dbConn.Exec(`
+	result := dbConn.Exec(`
 		UPDATE user SET password = ?, is_set_password = 1 
 		WHERE phoneNumber = ? OR username = ?
 	`, hashed, req.Phone, req.Phone)
-	if err != nil {
-		log.Errorf("重置密码失败: %v", err)
+
+	if result.Error != nil {
+		log.Errorf("重置密码失败: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
