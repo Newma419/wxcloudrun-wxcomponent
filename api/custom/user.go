@@ -32,19 +32,7 @@ func generateToken(userID string) string {
 // 获取微信手机号（通过 code）
 // TODO: 正式环境需要替换为真实的微信API调用
 func getPhoneNumberByCode(code string) (string, error) {
-	// 实际实现需要调用微信接口：
-	// POST https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=ACCESS_TOKEN
-	// 请求体: {"code": "xxx"}
-	// 
-	// 开发测试阶段，暂时返回模拟数据
 	log.Infof("获取手机号，code: %s", code)
-	
-	// TODO: 正式环境替换为真实接口
-	// 这里需要：
-	// 1. 获取 access_token
-	// 2. 调用微信接口换取手机号
-	// 3. 解析返回结果中的 phone_info.phoneNumber
-	
 	// 临时返回模拟手机号（开发测试用）
 	return "13800138000", nil
 }
@@ -62,9 +50,17 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	// 获取底层 *sql.DB 用于 QueryRow
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
@@ -77,7 +73,7 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	// 2. 查询用户是否存在（优先用phoneNumber，兼容username字段）
+	// 2. 查询用户是否存在
 	var userInfo struct {
 		ID            string  `json:"_id"`
 		Openid        string  `json:"_openid"`
@@ -87,7 +83,7 @@ func LoginByPhone(c *gin.Context) {
 		Balance       float64 `json:"balance"`
 	}
 
-	err = dbConn.QueryRow(`
+	err = sqlDB.QueryRow(`
 		SELECT id, _openid, phoneNumber, nickName, is_set_password, balance 
 		FROM user WHERE phoneNumber = ? OR username = ?
 	`, phoneNumber, phoneNumber).Scan(
@@ -99,7 +95,7 @@ func LoginByPhone(c *gin.Context) {
 		if err == sql.ErrNoRows {
 			// 3. 新用户，创建记录
 			openid := fmt.Sprintf("user_%d", time.Now().UnixNano())
-			result, err := dbConn.Exec(`
+			result, err := sqlDB.Exec(`
 				INSERT INTO user (_openid, phoneNumber, username, nickName, is_set_password, balance, createTime)
 				VALUES (?, ?, ?, ?, 0, 0, NOW())
 			`, openid, phoneNumber, phoneNumber, fmt.Sprintf("用户%s", phoneNumber[7:11]))
@@ -170,7 +166,7 @@ func SetPassword(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
@@ -180,7 +176,7 @@ func SetPassword(c *gin.Context) {
 	// 加密密码
 	hashed := hashPassword(req.Password)
 
-	// 更新用户密码（同时兼容phoneNumber和username）
+	// 更新用户密码
 	result, err := dbConn.Exec(`
 		UPDATE user SET password = ?, is_set_password = 1 
 		WHERE phoneNumber = ? OR username = ?
@@ -205,13 +201,10 @@ func SetPassword(c *gin.Context) {
 		NickName    string  `json:"nickName"`
 		Balance     float64 `json:"balance"`
 	}
-	err = dbConn.QueryRow(`
+	err = dbConn.Raw(`
 		SELECT id, _openid, phoneNumber, nickName, balance 
 		FROM user WHERE phoneNumber = ? OR username = ?
-	`, req.Phone, req.Phone).Scan(
-		&userInfo.ID, &userInfo.Openid, &userInfo.PhoneNumber,
-		&userInfo.NickName, &userInfo.Balance,
-	)
+	`, req.Phone, req.Phone).Scan(&userInfo).Error
 	if err != nil {
 		log.Errorf("查询用户失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
@@ -248,9 +241,16 @@ func CheckToken(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
@@ -263,7 +263,7 @@ func CheckToken(c *gin.Context) {
 		Balance     float64 `json:"balance"`
 	}
 	var expireTime time.Time
-	err := dbConn.QueryRow(`
+	err = sqlDB.QueryRow(`
 		SELECT id, _openid, phoneNumber, nickName, balance, token_expire 
 		FROM user WHERE token = ?
 	`, req.Token).Scan(
@@ -308,9 +308,16 @@ func VerifyPhoneForReset(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
@@ -325,7 +332,7 @@ func VerifyPhoneForReset(c *gin.Context) {
 
 	// 检查该手机号是否已注册
 	var exists int
-	err = dbConn.QueryRow(`
+	err = sqlDB.QueryRow(`
 		SELECT COUNT(*) FROM user WHERE phoneNumber = ? OR username = ?
 	`, phoneNumber, phoneNumber).Scan(&exists)
 	if err != nil {
@@ -370,7 +377,7 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
