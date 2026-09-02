@@ -32,15 +32,15 @@ type Coupon struct {
 
 // UserCoupon 用户优惠券结构
 type UserCoupon struct {
-	ID           int       `json:"id"`
-	UserID       string    `json:"user_id"`
-	CouponID     int       `json:"coupon_id"`
-	Code         string    `json:"code"`
-	Status       int       `json:"status"` // 0-未使用，1-已使用，2-已过期
-	ReceivedTime time.Time `json:"received_time"`
+	ID           int        `json:"id"`
+	UserID       string     `json:"user_id"`
+	CouponID     int        `json:"coupon_id"`
+	Code         string     `json:"code"`
+	Status       int        `json:"status"` // 0-未使用，1-已使用，2-已过期
+	ReceivedTime time.Time  `json:"received_time"`
 	UsedTime     *time.Time `json:"used_time"`
-	OrderID      string    `json:"order_id"`
-	ExpireTime   time.Time `json:"expire_time"`
+	OrderID      string     `json:"order_id"`
+	ExpireTime   time.Time  `json:"expire_time"`
 	// 关联字段
 	CouponName  string  `json:"coupon_name,omitempty"`
 	CouponType  int     `json:"coupon_type,omitempty"`
@@ -57,15 +57,22 @@ func GetCouponList(c *gin.Context) {
 		shopID = "default"
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
 		return
 	}
 
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
 	now := time.Now().Format("2006-01-02 15:04:05")
-	rows, err := dbConn.Query(`
+	rows, err := sqlDB.Query(`
 		SELECT id, shop_id, name, type, value, threshold, stock, used_count, 
 		       per_user_limit, start_time, end_time, status, description
 		FROM coupons 
@@ -119,7 +126,7 @@ func ReceiveCoupon(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
@@ -232,16 +239,23 @@ func GetUserCoupons(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
 		return
 	}
 
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	rows, err := dbConn.Query(`
+	rows, err := sqlDB.Query(`
 		SELECT 
 			uc.id, uc.user_id, uc.coupon_id, uc.code, uc.status, 
 			uc.received_time, uc.used_time, uc.order_id, uc.expire_time,
@@ -300,16 +314,23 @@ func GetAvailableCoupons(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
 		return
 	}
 
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	rows, err := dbConn.Query(`
+	rows, err := sqlDB.Query(`
 		SELECT 
 			uc.id, uc.user_id, uc.coupon_id, uc.code, uc.status, 
 			uc.received_time, uc.used_time, uc.order_id, uc.expire_time,
@@ -370,16 +391,23 @@ func UseCoupon(c *gin.Context) {
 		return
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
 		return
 	}
 
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
 	// 验证该优惠券属于当前用户且未被使用
 	var status int
-	err := dbConn.QueryRow(`
+	err = sqlDB.QueryRow(`
 		SELECT status FROM user_coupons 
 		WHERE id = ? AND user_id = ?
 	`, req.UserCouponID, req.UserID).Scan(&status)
@@ -418,7 +446,7 @@ func UseCoupon(c *gin.Context) {
 		Type     int     `json:"type"`
 		Value    float64 `json:"value"`
 	}
-	err = dbConn.QueryRow(`
+	err = sqlDB.QueryRow(`
 		SELECT c.id, c.type, c.value
 		FROM user_coupons uc
 		LEFT JOIN coupons c ON uc.coupon_id = c.id
@@ -451,14 +479,21 @@ func GetAdminCouponList(c *gin.Context) {
 		shopID = "default"
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
 		return
 	}
 
-	rows, err := dbConn.Query(`
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		log.Errorf("获取数据库连接失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	rows, err := sqlDB.Query(`
 		SELECT id, shop_id, name, type, value, threshold, stock, used_count, 
 		       per_user_limit, start_time, end_time, status, description
 		FROM coupons 
@@ -538,7 +573,7 @@ func SaveCoupon(c *gin.Context) {
 		req.Status = 1
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
@@ -600,7 +635,7 @@ func DeleteCoupon(c *gin.Context) {
 		req.ShopID = "default"
 	}
 
-	dbConn := db.GetDB()
+	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "数据库连接失败"})
