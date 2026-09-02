@@ -41,8 +41,19 @@ func Init() *gin.Engine {
 	// 用于内部调用，走云托管固定出口 IP
 	customGroup := r.Group("/custom")
 	{
+		// ============================================================
 		// 部署
+		// ============================================================
 		customGroup.POST("/deploy", custom.DeployHandler)
+
+		// ============================================================
+		// 用户登录相关
+		// ============================================================
+		customGroup.POST("/user/login-phone", custom.LoginByPhone)              // 一键登录
+		customGroup.POST("/user/set-password", custom.SetPassword)              // 设置密码
+		customGroup.POST("/user/check-token", custom.CheckToken)                // 校验token
+		customGroup.POST("/user/verify-phone-reset", custom.VerifyPhoneForReset) // 验证手机号（重置密码第一步）
+		customGroup.POST("/user/reset-password", custom.ResetPassword)          // 重置密码
 
 		// ============================================================
 		// 优惠券相关接口
