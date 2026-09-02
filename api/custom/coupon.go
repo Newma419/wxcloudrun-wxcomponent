@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
+	"gorm.io/gorm"
 )
 
 // Coupon 优惠券模板结构
@@ -134,32 +135,29 @@ func ReceiveCoupon(c *gin.Context) {
 	}
 
 	// 开启事务
-	tx, err := dbConn.Begin()
-	if err != nil {
-		log.Errorf("开启事务失败: %v", err)
+	tx := dbConn.Begin()
+	if tx.Error != nil {
+		log.Errorf("开启事务失败: %v", tx.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
-	defer tx.Rollback()
 
 	// 1. 查询优惠券信息并锁定
 	var cp Coupon
-	err = tx.QueryRow(`
+	err := tx.Raw(`
 		SELECT id, name, type, value, threshold, stock, used_count, per_user_limit, 
 		       start_time, end_time, status
 		FROM coupons WHERE id = ? FOR UPDATE
-	`, req.CouponID).Scan(
-		&cp.ID, &cp.Name, &cp.Type, &cp.Value, &cp.Threshold,
-		&cp.Stock, &cp.UsedCount, &cp.PerUserLimit,
-		&cp.StartTime, &cp.EndTime, &cp.Status,
-	)
+	`, req.CouponID).Scan(&cp).Error
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == gorm.ErrRecordNotFound {
+			tx.Rollback()
 			c.JSON(http.StatusOK, gin.H{"code": 404, "message": "优惠券不存在"})
 			return
 		}
 		log.Errorf("查询优惠券失败: %v", err)
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
@@ -167,30 +165,35 @@ func ReceiveCoupon(c *gin.Context) {
 	// 2. 验证券是否可用
 	now := time.Now()
 	if cp.Status != 1 {
+		tx.Rollback()
 		c.JSON(http.StatusOK, gin.H{"code": 400, "message": "该优惠券已停用"})
 		return
 	}
 	if now.Before(cp.StartTime) || now.After(cp.EndTime) {
+		tx.Rollback()
 		c.JSON(http.StatusOK, gin.H{"code": 400, "message": "该优惠券已过期或未开始"})
 		return
 	}
 	if cp.Stock <= cp.UsedCount {
+		tx.Rollback()
 		c.JSON(http.StatusOK, gin.H{"code": 400, "message": "优惠券已领完"})
 		return
 	}
 
 	// 3. 检查用户是否已达到领取上限
 	var userCount int
-	err = tx.QueryRow(`
+	err = tx.Raw(`
 		SELECT COUNT(*) FROM user_coupons 
 		WHERE user_id = ? AND coupon_id = ? AND status = 0
-	`, req.UserID, req.CouponID).Scan(&userCount)
+	`, req.UserID, req.CouponID).Scan(&userCount).Error
 	if err != nil {
 		log.Errorf("查询用户领取数量失败: %v", err)
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
 	if userCount >= cp.PerUserLimit {
+		tx.Rollback()
 		c.JSON(http.StatusOK, gin.H{"code": 400, "message": "您已达到领取上限"})
 		return
 	}
@@ -199,28 +202,30 @@ func ReceiveCoupon(c *gin.Context) {
 	code := fmt.Sprintf("%d%s%d", req.CouponID, time.Now().Format("20060102150405"), rand.Intn(10000))
 
 	// 5. 插入用户优惠券
-	_, err = tx.Exec(`
+	result := tx.Exec(`
 		INSERT INTO user_coupons 
 		(user_id, coupon_id, code, expire_time)
 		VALUES (?, ?, ?, ?)
 	`, req.UserID, req.CouponID, code, cp.EndTime)
 
-	if err != nil {
-		log.Errorf("插入用户优惠券失败: %v", err)
+	if result.Error != nil {
+		log.Errorf("插入用户优惠券失败: %v", result.Error)
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "领取失败"})
 		return
 	}
 
 	// 6. 更新优惠券领取数量
-	_, err = tx.Exec(`UPDATE coupons SET used_count = used_count + 1 WHERE id = ?`, req.CouponID)
-	if err != nil {
-		log.Errorf("更新优惠券库存失败: %v", err)
+	result = tx.Exec(`UPDATE coupons SET used_count = used_count + 1 WHERE id = ?`, req.CouponID)
+	if result.Error != nil {
+		log.Errorf("更新优惠券库存失败: %v", result.Error)
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "领取失败"})
 		return
 	}
 
 	// 提交事务
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		log.Errorf("提交事务失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "领取失败"})
 		return
@@ -428,14 +433,14 @@ func UseCoupon(c *gin.Context) {
 	}
 
 	// 更新状态为已使用
-	_, err = dbConn.Exec(`
+	result := dbConn.Exec(`
 		UPDATE user_coupons 
 		SET status = 1, used_time = ?, order_id = ?
 		WHERE id = ? AND user_id = ?
 	`, time.Now(), req.OrderID, req.UserCouponID, req.UserID)
 
-	if err != nil {
-		log.Errorf("更新优惠券状态失败: %v", err)
+	if result.Error != nil {
+		log.Errorf("更新优惠券状态失败: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "使用失败"})
 		return
 	}
@@ -580,10 +585,10 @@ func SaveCoupon(c *gin.Context) {
 		return
 	}
 
-	var err error
+	var result *gorm.DB
 	if req.ID > 0 {
 		// 更新
-		_, err = dbConn.Exec(`
+		result = dbConn.Exec(`
 			UPDATE coupons SET 
 				name = ?, type = ?, value = ?, threshold = ?, 
 				stock = ?, per_user_limit = ?, start_time = ?, end_time = ?, 
@@ -594,7 +599,7 @@ func SaveCoupon(c *gin.Context) {
 			req.Status, req.Description, req.ID, req.ShopID)
 	} else {
 		// 新增
-		_, err = dbConn.Exec(`
+		result = dbConn.Exec(`
 			INSERT INTO coupons 
 			(shop_id, name, type, value, threshold, stock, per_user_limit, 
 			 start_time, end_time, status, description)
@@ -604,8 +609,8 @@ func SaveCoupon(c *gin.Context) {
 			req.Status, req.Description)
 	}
 
-	if err != nil {
-		log.Errorf("保存优惠券失败: %v", err)
+	if result.Error != nil {
+		log.Errorf("保存优惠券失败: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "保存失败"})
 		return
 	}
@@ -642,9 +647,9 @@ func DeleteCoupon(c *gin.Context) {
 		return
 	}
 
-	_, err := dbConn.Exec(`DELETE FROM coupons WHERE id = ? AND shop_id = ?`, req.ID, req.ShopID)
-	if err != nil {
-		log.Errorf("删除优惠券失败: %v", err)
+	result := dbConn.Exec(`DELETE FROM coupons WHERE id = ? AND shop_id = ?`, req.ID, req.ShopID)
+	if result.Error != nil {
+		log.Errorf("删除优惠券失败: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "删除失败"})
 		return
 	}
