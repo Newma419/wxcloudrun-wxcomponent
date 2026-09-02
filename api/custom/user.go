@@ -130,11 +130,16 @@ func LoginByPhone(c *gin.Context) {
 	// 4. 老用户，生成token
 	token := generateToken(userInfo.ID)
 	expireTime := time.Now().Add(7 * 24 * time.Hour)
-	_, err = dbConn.Exec(`
+
+	// ★★★ 修复点：将原来的 _, err = dbConn.Exec(...) 改为 result := dbConn.Exec(...) ★★★
+	result := dbConn.Exec(`
 		UPDATE user SET token = ?, token_expire = ? WHERE id = ?
 	`, token, expireTime, userInfo.ID)
-	if err != nil {
-		log.Errorf("更新token失败: %v", err)
+
+	if result.Error != nil {
+		log.Errorf("更新token失败: %v", result.Error)
+	} else {
+		log.Infof("token更新成功，影响行数: %d", result.RowsAffected)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
