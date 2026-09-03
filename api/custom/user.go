@@ -512,26 +512,34 @@ func getDefaultAuthorizerAppid() string {
 }
 
 // ============================================================
-// 1. 一键登录（微信授权获取手机号）
+// 1. 一键登录（微信授权获取手机号）- 带详细日志
 // ============================================================
 func LoginByPhone(c *gin.Context) {
+	log.Infof("✅✅✅ LoginByPhone 被调用 ✅✅✅")
+
 	var req struct {
 		Code string `json:"code"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil || req.Code == "" {
+		log.Infof("[ERROR] ShouldBindJSON 失败: %v, req: %+v", err, req)
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "参数错误"})
 		return
 	}
+
+	log.Infof("[DEBUG] 收到 code: %s", req.Code)
 
 	authorizerAppid := c.GetHeader("X-Appid")
 	if authorizerAppid == "" {
 		authorizerAppid = getDefaultAuthorizerAppid()
 	}
 	if authorizerAppid == "" {
+		log.Infof("[ERROR] 缺少商户 AppID")
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少商户 AppID"})
 		return
 	}
+
+	log.Infof("[DEBUG] authorizerAppid: %s", authorizerAppid)
 
 	dbConn := db.Get()
 	if dbConn == nil {
@@ -540,6 +548,8 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
+	log.Infof("[DEBUG] 数据库连接成功")
+
 	sqlDB, err := dbConn.DB()
 	if err != nil {
 		log.Errorf("获取数据库连接失败: %v", err)
@@ -547,12 +557,16 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
+	log.Infof("[DEBUG] sqlDB 获取成功")
+
 	phoneNumber, err := getPhoneNumberByCode(req.Code, authorizerAppid)
 	if err != nil {
 		log.Errorf("获取手机号失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"code": 500, "message": "获取手机号失败: " + err.Error()})
 		return
 	}
+
+	log.Infof("[DEBUG] 成功获取手机号: %s", phoneNumber)
 
 	var userInfo struct {
 		ID            string  `json:"_id"`
@@ -573,6 +587,7 @@ func LoginByPhone(c *gin.Context) {
 
 	if err != nil {
 		if err == sql.ErrNoRows {
+			log.Infof("[DEBUG] 用户不存在，创建新用户, phoneNumber: %s", phoneNumber)
 			openid := fmt.Sprintf("user_%d", time.Now().UnixNano())
 			result, err := sqlDB.Exec(`
 				INSERT INTO user (_openid, phoneNumber, username, nickName, is_set_password, balance, createTime)
@@ -605,6 +620,8 @@ func LoginByPhone(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
 		return
 	}
+
+	log.Infof("[DEBUG] 用户已存在，id: %s", userInfo.ID)
 
 	token := generateToken(userInfo.ID)
 	expireTime := time.Now().Add(7 * 24 * time.Hour)
