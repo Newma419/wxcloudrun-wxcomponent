@@ -30,13 +30,11 @@ const (
 // 工具函数
 // ============================================================
 
-// 密码加密（SHA256）
 func hashPassword(password string) string {
 	hash := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(hash[:])
 }
 
-// 生成登录令牌
 func generateToken(userID string) string {
 	return fmt.Sprintf("token_%s_%d", userID, time.Now().UnixNano())
 }
@@ -45,12 +43,10 @@ func generateToken(userID string) string {
 // 获取第三方平台配置
 // ============================================================
 
-// getComponentAppid 获取第三方平台的 AppID
 func getComponentAppid() string {
 	return "wx0c8a63459db5b5c8"
 }
 
-// getComponentAppsecret 获取第三方平台的 AppSecret
 func getComponentAppsecret() string {
 	return "e07a8212bf494fffbda69dc8d34b4039"
 }
@@ -59,14 +55,12 @@ func getComponentAppsecret() string {
 // 获取 component_verify_ticket（从 wxbase 统一读取 + 数据库降级）
 // ============================================================
 func getComponentVerifyTicket() string {
-	// ★ 优先从 wxbase 读取（comm 表 + 15分钟缓存）
 	ticket := wxbase.GetTicket()
 	if ticket != "" {
 		log.Infof("从 comm 表获取 component_verify_ticket 成功")
 		return ticket
 	}
 
-	// 降级方案：从 wxcallback_component 表读取
 	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空，无法获取 component_verify_ticket")
@@ -324,12 +318,12 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 
 	reqBody := map[string]interface{}{
 		"privacy_ver": 2,
-		// ★ 开发者信息（必填）- 已使用你提供的联系方式 ★
+		// ★ owner_setting 必须包含 contact_name、contact_email、contact_phone ★
 		"owner_setting": map[string]string{
-			"contact_email": "19974995457@163.com", // 你的邮箱
-			"contact_phone": "19974995457",         // 你的电话
+			"contact_name":  "智小助科技",              // ★ 新增：联系人姓名
+			"contact_email": "19974995457@163.com",
+			"contact_phone": "19974995457",
 		},
-		// ★ 用户告知方式（必填） ★
 		"notice_method": "通过弹窗通知用户",
 		"setting_list": []map[string]string{
 			{
@@ -493,7 +487,6 @@ func getPhoneNumberByCode(code string, authorizerAppid string) (string, error) {
 	}
 	log.Infof("成功换取手机号: %s", phoneNumber)
 
-	// 同步配置隐私协议（只需配置一次，失败会记录错误但登录仍继续）
 	if err := setupPrivacySetting(authorizerAccessToken, authorizerAppid); err != nil {
 		log.Errorf("配置隐私协议失败（不影响登录）: %v", err)
 	} else {
