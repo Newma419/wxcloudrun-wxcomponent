@@ -320,6 +320,59 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 }
 
 // ============================================================
+// ★★★ 新增：配置商户小程序隐私协议 ★★★
+// ============================================================
+func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) error {
+	url := "https://api.weixin.qq.com/cgi-bin/component/setprivacysetting"
+
+	// 构建请求参数
+	reqBody := map[string]interface{}{
+		"privacy_ver": 2, // 2 代表开发版
+		"setting_list": []map[string]string{
+			{
+				"privacy_key":  "PhoneNumber",
+				"privacy_text": "用于用户注册和登录，方便您管理订单和个人信息",
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %v", err)
+	}
+
+	requestURL := fmt.Sprintf("%s?access_token=%s", url, authorizerAccessToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(requestURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("调用微信接口失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析响应失败: %v, body: %s", err, string(body))
+	}
+
+	if result.ErrCode != 0 {
+		log.Infof("[WARN] 配置隐私协议失败: %d, %s", result.ErrCode, result.ErrMsg)
+		return fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
+	}
+
+	log.Infof("✅ 成功配置隐私协议，appid: %s", authorizerAppid)
+	return nil
+}
+
+// ============================================================
 // 获取微信手机号（通过 code）
 // ============================================================
 func getPhoneNumberByCode(code string, authorizerAppid string) (string, error) {
@@ -382,7 +435,14 @@ func getPhoneNumberByCode(code string, authorizerAppid string) (string, error) {
 		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
 	}
 
-	// 4. 返回手机号
+	// 4. ★★★ 成功换取手机号后，配置隐私协议（只需配置一次） ★★★
+	go func() {
+		if err := setupPrivacySetting(authorizerAccessToken, authorizerAppid); err != nil {
+			log.Infof("[WARN] 配置隐私协议失败（不影响登录）: %v", err)
+		}
+	}()
+
+	// 5. 返回手机号
 	phoneNumber := result.PhoneInfo.PurePhoneNumber
 	if phoneNumber == "" {
 		phoneNumber = result.PhoneInfo.PhoneNumber
