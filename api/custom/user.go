@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
+	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/wx/base" // ★ 新增：统一 ticket 管理
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
 	"gorm.io/gorm"
 )
@@ -57,9 +58,18 @@ func getComponentAppsecret() string {
 }
 
 // ============================================================
-// 获取 component_verify_ticket（从 wxcallback_component 表的 postbody 解析）
+// 获取 component_verify_ticket（从 wxbase 统一读取 + 数据库降级）
 // ============================================================
 func getComponentVerifyTicket() string {
+	// ★★★ 优先从 wxbase 读取（comm 表 + 15分钟缓存） ★★★
+	ticket := wxbase.GetTicket()
+	if ticket != "" {
+		log.Infof("从 comm 表获取 component_verify_ticket 成功")
+		return ticket
+	}
+
+	// 降级方案：如果 comm 表没有，从 wxcallback_component 表读取
+	// （正常情况下不会走到这里，仅作容错）
 	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空，无法获取 component_verify_ticket")
@@ -93,7 +103,7 @@ func getComponentVerifyTicket() string {
 		return ""
 	}
 
-	log.Infof("成功获取 component_verify_ticket")
+	log.Infof("从 wxcallback_component 表获取 component_verify_ticket 成功（降级）")
 	return data.ComponentVerifyTicket
 }
 
@@ -383,7 +393,7 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 }
 
 // ============================================================
-// ★★★ 新增：手动触发配置隐私协议（测试接口） ★★★
+// ★★★ 手动触发配置隐私协议（测试接口） ★★★
 // ============================================================
 func SetupPrivacy(c *gin.Context) {
 	authorizerAppid := c.Query("appid")
