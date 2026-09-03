@@ -517,6 +517,16 @@ func getDefaultAuthorizerAppid() string {
 func LoginByPhone(c *gin.Context) {
 	log.Infof("✅✅✅ LoginByPhone 被调用 ✅✅✅")
 
+	// ★★★ 读取原始请求体 ★★★
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Errorf("读取请求体失败: %v", err)
+	} else {
+		log.Infof("[DEBUG] 原始请求体: %s", string(bodyBytes))
+		// 重新设置请求体，以便后续可以再次读取
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	}
+
 	var req struct {
 		Code string `json:"code"`
 	}
