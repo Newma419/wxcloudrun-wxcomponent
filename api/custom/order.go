@@ -22,8 +22,8 @@ func GetOrderList(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
-	status := c.DefaultQuery("status", "all") // all, pending, paid, completed, cancelled
-	orderType := c.DefaultQuery("type", "all") // all, dine_in, takeaway
+	status := c.DefaultQuery("status", "all")
+	orderType := c.DefaultQuery("type", "all")
 
 	dbConn := db.Get()
 	if dbConn == nil {
@@ -65,7 +65,7 @@ func GetOrderList(c *gin.Context) {
 }
 
 // ============================================================
-// 获取预定列表（额外功能）
+// 获取预定列表
 // ============================================================
 func GetReservationList(c *gin.Context) {
 	openid := c.Query("openid")
