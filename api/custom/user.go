@@ -2,9 +2,12 @@
 package custom
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -29,12 +32,115 @@ func generateToken(userID string) string {
 	return fmt.Sprintf("token_%s_%d", userID, time.Now().UnixNano())
 }
 
-// 获取微信手机号（通过 code）
-// TODO: 正式环境需要替换为真实的微信API调用
+// ============================================================
+// ★★★ 核心修改：获取微信手机号（通过 code）- 真实接口 ★★★
+// ============================================================
 func getPhoneNumberByCode(code string) (string, error) {
-	log.Infof("获取手机号，code: %s", code)
-	// 临时返回模拟手机号（开发测试用）
-	return "13800138000", nil
+	log.Infof("开始换取手机号，code: %s", code)
+
+	// 1. 【关键】获取 authorizer_access_token
+	//    这个 token 必须是当前商户小程序的
+	//    你的 wxcloudrun-wxcomponent 项目中应该有现成的获取方法
+	authorizerAccessToken, err := getAuthorizerAccessToken()
+	if err != nil {
+		log.Errorf("获取 authorizer_access_token 失败: %v", err)
+		return "", fmt.Errorf("获取访问令牌失败: %v", err)
+	}
+
+	// 2. 调用微信接口换取手机号
+	url := fmt.Sprintf(
+		"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=%s",
+		authorizerAccessToken,
+	)
+
+	reqBody := map[string]interface{}{
+		"code": code,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %v", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Errorf("调用微信接口失败: %v", err)
+		return "", fmt.Errorf("调用微信接口失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	log.Infof("微信接口返回: %s", string(body))
+
+	// 3. 解析返回结果
+	var result struct {
+		ErrCode   int    `json:"errcode"`
+		ErrMsg    string `json:"errmsg"`
+		PhoneInfo struct {
+			PhoneNumber     string `json:"phoneNumber"`
+			PurePhoneNumber string `json:"purePhoneNumber"`
+			CountryCode     string `json:"countryCode"`
+		} `json:"phone_info"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Errorf("解析微信返回结果失败: %v, body: %s", err, string(body))
+		return "", fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if result.ErrCode != 0 {
+		log.Errorf("微信接口返回错误: %d, %s", result.ErrCode, result.ErrMsg)
+		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
+	}
+
+	// 4. 返回手机号（优先使用 purePhoneNumber，无区号版本）
+	phoneNumber := result.PhoneInfo.PurePhoneNumber
+	if phoneNumber == "" {
+		phoneNumber = result.PhoneInfo.PhoneNumber
+	}
+	log.Infof("成功换取手机号: %s", phoneNumber)
+	return phoneNumber, nil
+}
+
+// ============================================================
+// ★★★ 需要你实现：获取 authorizer_access_token ★★★
+// ============================================================
+func getAuthorizerAccessToken() (string, error) {
+	// ⚠️ 警告：此函数需要你根据项目实际情况实现
+
+	// 你的 wxcloudrun-wxcomponent 项目应该有 token 管理机制，
+	// 请参考项目中的 token 获取逻辑来填充此函数。
+
+	// 常见实现方式：
+	// 1. 从缓存（Redis/内存）中读取
+	// 2. 如果缓存不存在，使用 authorizer_refresh_token 刷新
+	// 3. 刷新后存入缓存，返回新 token
+
+	// 示例（需要替换为你的实际代码）：
+	// token, err := cache.Get("authorizer_access_token")
+	// if err == nil && token != "" {
+	//     return token, nil
+	// }
+	// 
+	// refreshToken, err := getRefreshTokenFromDB(appid)
+	// if err != nil {
+	//     return "", err
+	// }
+	// 
+	// newToken, err := refreshAuthorizerToken(refreshToken)
+	// if err != nil {
+	//     return "", err
+	// }
+	// 
+	// cache.Set("authorizer_access_token", newToken, 2*time.Hour)
+	// return newToken, nil
+
+	// 临时返回错误，提示需要实现
+	return "", fmt.Errorf("请实现 getAuthorizerAccessToken 函数")
 }
 
 // ============================================================
@@ -65,11 +171,11 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	// 1. 调用微信接口获取手机号
+	// 1. 调用微信接口获取手机号（现在是真实接口了）
 	phoneNumber, err := getPhoneNumberByCode(req.Code)
 	if err != nil {
 		log.Errorf("获取手机号失败: %v", err)
-		c.JSON(http.StatusOK, gin.H{"code": 500, "message": "获取手机号失败"})
+		c.JSON(http.StatusOK, gin.H{"code": 500, "message": "获取手机号失败: " + err.Error()})
 		return
 	}
 
@@ -131,7 +237,6 @@ func LoginByPhone(c *gin.Context) {
 	token := generateToken(userInfo.ID)
 	expireTime := time.Now().Add(7 * 24 * time.Hour)
 
-	// ★★★ 修复点：将原来的 _, err = dbConn.Exec(...) 改为 result := dbConn.Exec(...) ★★★
 	result := dbConn.Exec(`
 		UPDATE user SET token = ?, token_expire = ? WHERE id = ?
 	`, token, expireTime, userInfo.ID)
@@ -327,7 +432,7 @@ func VerifyPhoneForReset(c *gin.Context) {
 		return
 	}
 
-	// 获取手机号
+	// 获取手机号（也使用真实接口）
 	phoneNumber, err := getPhoneNumberByCode(req.Code)
 	if err != nil {
 		log.Errorf("获取手机号失败: %v", err)
