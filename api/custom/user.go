@@ -75,7 +75,7 @@ func getComponentVerifyTicket() string {
 	`).Scan(&postbody).Error
 
 	if err != nil || postbody == "" {
-		log.Warnf("未找到 component_verify_ticket 记录: %v", err)
+		log.Infof("[WARN] 未找到 component_verify_ticket 记录: %v", err)
 		return ""
 	}
 
@@ -84,12 +84,12 @@ func getComponentVerifyTicket() string {
 		ComponentVerifyTicket string `json:"component_verify_ticket"`
 	}
 	if err := json.Unmarshal([]byte(postbody), &data); err != nil {
-		log.Warnf("解析 component_verify_ticket 失败: %v, postbody: %s", err, postbody)
+		log.Infof("[WARN] 解析 component_verify_ticket 失败: %v, postbody: %s", err, postbody)
 		return ""
 	}
 
 	if data.ComponentVerifyTicket == "" {
-		log.Warnf("component_verify_ticket 字段为空")
+		log.Infof("[WARN] component_verify_ticket 字段为空")
 		return ""
 	}
 
@@ -120,13 +120,13 @@ func getComponentAccessToken() (string, error) {
 	`, TokenTypeComponentAccess, getComponentAppid()).Scan(&tokenInfo).Error
 
 	if err != nil || tokenInfo.Token == "" {
-		log.Warnf("component_access_token 不存在，尝试刷新获取")
+		log.Infof("[WARN] component_access_token 不存在，尝试刷新获取")
 		return refreshComponentAccessToken()
 	}
 
 	// 检查是否过期（提前 5 分钟刷新）
 	if time.Now().Add(5 * time.Minute).After(tokenInfo.ExpireTime) {
-		log.Infof("component_access_token 即将过期，尝试刷新")
+		log.Infof("[WARN] component_access_token 即将过期，尝试刷新")
 		return refreshComponentAccessToken()
 	}
 
@@ -188,7 +188,7 @@ func refreshComponentAccessToken() (string, error) {
 			VALUES (?, ?, ?, ?, NOW(), NOW())
 		`, TokenTypeComponentAccess, getComponentAppid(), result.ComponentAccessToken, expireTime).Error
 		if err != nil {
-			log.Warnf("缓存 component_access_token 失败: %v", err)
+			log.Infof("[WARN] 缓存 component_access_token 失败: %v", err)
 		}
 	}
 
@@ -300,7 +300,7 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 	`, TokenTypeAuthorizerAccess, authorizerAppid, result.AuthorizerAccessToken, expireTime).Error
 
 	if err != nil {
-		log.Warnf("缓存 authorizer_access_token 失败: %v", err)
+		log.Infof("[WARN] 缓存 authorizer_access_token 失败: %v", err)
 	}
 
 	// 8. 如果 refreshtoken 更新了，同步更新 authorizers 表
@@ -311,7 +311,7 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 			WHERE appid = ?
 		`, result.AuthorizerRefreshToken, authorizerAppid).Error
 		if err != nil {
-			log.Warnf("更新 refreshtoken 失败: %v", err)
+			log.Infof("[WARN] 更新 refreshtoken 失败: %v", err)
 		}
 	}
 
