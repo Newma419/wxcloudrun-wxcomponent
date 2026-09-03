@@ -57,6 +57,47 @@ func getComponentAppsecret() string {
 }
 
 // ============================================================
+// 获取 component_verify_ticket（从 wxcallback_component 表的 postbody 解析）
+// ============================================================
+func getComponentVerifyTicket() string {
+	dbConn := db.Get()
+	if dbConn == nil {
+		log.Error("数据库连接为空，无法获取 component_verify_ticket")
+		return ""
+	}
+
+	var postbody string
+	err := dbConn.Raw(`
+		SELECT postbody 
+		FROM wxcallback_component 
+		WHERE infotype = 'component_verify_ticket'
+		ORDER BY id DESC LIMIT 1
+	`).Scan(&postbody).Error
+
+	if err != nil || postbody == "" {
+		log.Warnf("未找到 component_verify_ticket 记录: %v", err)
+		return ""
+	}
+
+	// 解析 JSON 获取 ticket
+	var data struct {
+		ComponentVerifyTicket string `json:"component_verify_ticket"`
+	}
+	if err := json.Unmarshal([]byte(postbody), &data); err != nil {
+		log.Warnf("解析 component_verify_ticket 失败: %v, postbody: %s", err, postbody)
+		return ""
+	}
+
+	if data.ComponentVerifyTicket == "" {
+		log.Warnf("component_verify_ticket 字段为空")
+		return ""
+	}
+
+	log.Infof("成功获取 component_verify_ticket")
+	return data.ComponentVerifyTicket
+}
+
+// ============================================================
 // 获取 component_access_token
 // ============================================================
 func getComponentAccessToken() (string, error) {
@@ -123,10 +164,10 @@ func refreshComponentAccessToken() (string, error) {
 	}
 
 	var result struct {
-		ErrCode         int    `json:"errcode"`
-		ErrMsg          string `json:"errmsg"`
+		ErrCode              int    `json:"errcode"`
+		ErrMsg               string `json:"errmsg"`
 		ComponentAccessToken string `json:"component_access_token"`
-		ExpiresIn       int    `json:"expires_in"`
+		ExpiresIn            int    `json:"expires_in"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -153,31 +194,6 @@ func refreshComponentAccessToken() (string, error) {
 
 	log.Infof("成功刷新 component_access_token")
 	return result.ComponentAccessToken, nil
-}
-
-// ============================================================
-// 获取 component_verify_ticket（从数据库或缓存）
-// ============================================================
-func getComponentVerifyTicket() string {
-	// component_verify_ticket 由微信每 10 分钟推送到 /wxcallback/component
-	// 需要从数据库或缓存中读取最新的 ticket
-
-	dbConn := db.Get()
-	if dbConn == nil {
-		return ""
-	}
-
-	var ticket string
-	err := dbConn.Raw(`
-		SELECT ticket FROM wxcallback_component 
-		ORDER BY id DESC LIMIT 1
-	`).Scan(&ticket).Error
-
-	if err != nil || ticket == "" {
-		log.Warnf("未找到 component_verify_ticket")
-		return ""
-	}
-	return ticket
 }
 
 // ============================================================
@@ -260,10 +276,10 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 
 	// 6. 解析响应
 	var result struct {
-		ErrCode               int    `json:"errcode"`
-		ErrMsg                string `json:"errmsg"`
-		AuthorizerAccessToken string `json:"authorizer_access_token"`
-		ExpiresIn             int    `json:"expires_in"`
+		ErrCode                int    `json:"errcode"`
+		ErrMsg                 string `json:"errmsg"`
+		AuthorizerAccessToken  string `json:"authorizer_access_token"`
+		ExpiresIn              int    `json:"expires_in"`
 		AuthorizerRefreshToken string `json:"authorizer_refresh_token"`
 	}
 
