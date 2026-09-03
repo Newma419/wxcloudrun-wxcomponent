@@ -318,12 +318,11 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 
 	reqBody := map[string]interface{}{
 		"privacy_ver": 2,
-		// ★ owner_setting 必须包含 contact_name、contact_email、contact_phone ★
 		"owner_setting": map[string]string{
-			"contact_name":  "智小助科技",              // ★ 新增：联系人姓名
+			"contact_name":  "智小助科技",
 			"contact_email": "19974995457@163.com",
 			"contact_phone": "19974995457",
-			"notice_method": "通知"
+			"notice_method": "公告", // ★★★ 放在 owner_setting 内部 ★★★
 		},
 		"setting_list": []map[string]string{
 			{
