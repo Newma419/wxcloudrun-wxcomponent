@@ -320,14 +320,15 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 }
 
 // ============================================================
-// ★★★ 新增：配置商户小程序隐私协议 ★★★
+// ★★★ 配置商户小程序隐私协议（同步调用 + 详细日志） ★★★
 // ============================================================
 func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) error {
+	log.Infof("开始配置隐私协议, appid: %s", authorizerAppid)
+
 	url := "https://api.weixin.qq.com/cgi-bin/component/setprivacysetting"
 
-	// 构建请求参数
 	reqBody := map[string]interface{}{
-		"privacy_ver": 2, // 2 代表开发版
+		"privacy_ver": 2,
 		"setting_list": []map[string]string{
 			{
 				"privacy_key":  "PhoneNumber",
@@ -338,21 +339,29 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("序列化请求失败: %v", err)
+		log.Errorf("序列化请求失败: %v", err)
+		return err
 	}
 
 	requestURL := fmt.Sprintf("%s?access_token=%s", url, authorizerAccessToken)
+	log.Infof("请求URL: %s", requestURL)
+	log.Infof("请求体: %s", string(jsonData))
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(requestURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("调用微信接口失败: %v", err)
+		log.Errorf("调用微信接口失败: %v", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("读取响应失败: %v", err)
+		log.Errorf("读取响应失败: %v", err)
+		return err
 	}
+
+	log.Infof("微信接口返回: %s", string(body))
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
@@ -360,11 +369,12 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("解析响应失败: %v, body: %s", err, string(body))
+		log.Errorf("解析响应失败: %v", err)
+		return err
 	}
 
 	if result.ErrCode != 0 {
-		log.Infof("[WARN] 配置隐私协议失败: %d, %s", result.ErrCode, result.ErrMsg)
+		log.Errorf("配置隐私协议失败: %d, %s", result.ErrCode, result.ErrMsg)
 		return fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
 	}
 
@@ -435,19 +445,20 @@ func getPhoneNumberByCode(code string, authorizerAppid string) (string, error) {
 		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
 	}
 
-	// 4. ★★★ 成功换取手机号后，配置隐私协议（只需配置一次） ★★★
-	go func() {
-		if err := setupPrivacySetting(authorizerAccessToken, authorizerAppid); err != nil {
-			log.Infof("[WARN] 配置隐私协议失败（不影响登录）: %v", err)
-		}
-	}()
-
-	// 5. 返回手机号
+	// 4. 返回手机号
 	phoneNumber := result.PhoneInfo.PurePhoneNumber
 	if phoneNumber == "" {
 		phoneNumber = result.PhoneInfo.PhoneNumber
 	}
 	log.Infof("成功换取手机号: %s", phoneNumber)
+
+	// 5. ★★★ 同步配置隐私协议（只需配置一次，失败会记录错误但登录仍继续） ★★★
+	if err := setupPrivacySetting(authorizerAccessToken, authorizerAppid); err != nil {
+		log.Errorf("配置隐私协议失败（不影响登录）: %v", err)
+	} else {
+		log.Infof("✅ 隐私协议配置成功，appid: %s", authorizerAppid)
+	}
+
 	return phoneNumber, nil
 }
 
