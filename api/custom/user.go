@@ -18,6 +18,14 @@ import (
 )
 
 // ============================================================
+// Token 类型常量
+// ============================================================
+const (
+	TokenTypeComponentAccess  = 1 // component_access_token
+	TokenTypeAuthorizerAccess = 2 // authorizer_access_token
+)
+
+// ============================================================
 // 工具函数
 // ============================================================
 
@@ -33,15 +41,276 @@ func generateToken(userID string) string {
 }
 
 // ============================================================
-// ★★★ 核心修改：获取微信手机号（通过 code）- 真实接口 ★★★
+// 获取第三方平台配置
 // ============================================================
-func getPhoneNumberByCode(code string) (string, error) {
-	log.Infof("开始换取手机号，code: %s", code)
 
-	// 1. 【关键】获取 authorizer_access_token
-	//    这个 token 必须是当前商户小程序的
-	//    你的 wxcloudrun-wxcomponent 项目中应该有现成的获取方法
-	authorizerAccessToken, err := getAuthorizerAccessToken()
+// getComponentAppid 获取第三方平台的 AppID
+func getComponentAppid() string {
+	// 你的第三方平台 AppID
+	return "wx0c8a63459db5b5c8"
+}
+
+// getComponentAppsecret 获取第三方平台的 AppSecret
+func getComponentAppsecret() string {
+	// 你的第三方平台 AppSecret
+	return "e07a8212bf494fffbda69dc8d34b4039"
+}
+
+// ============================================================
+// 获取 component_access_token
+// ============================================================
+func getComponentAccessToken() (string, error) {
+	dbConn := db.Get()
+	if dbConn == nil {
+		return "", fmt.Errorf("数据库连接为空")
+	}
+
+	var tokenInfo struct {
+		Token      string    `gorm:"column:token"`
+		ExpireTime time.Time `gorm:"column:expiretime"`
+	}
+
+	// 从 wxtoken 表查询 type=1 且 appid 为第三方平台 AppID 的记录
+	err := dbConn.Raw(`
+		SELECT token, expiretime 
+		FROM wxtoken 
+		WHERE type = ? AND appid = ?
+		ORDER BY id DESC LIMIT 1
+	`, TokenTypeComponentAccess, getComponentAppid()).Scan(&tokenInfo).Error
+
+	if err != nil || tokenInfo.Token == "" {
+		log.Warnf("component_access_token 不存在，尝试刷新获取")
+		return refreshComponentAccessToken()
+	}
+
+	// 检查是否过期（提前 5 分钟刷新）
+	if time.Now().Add(5 * time.Minute).After(tokenInfo.ExpireTime) {
+		log.Infof("component_access_token 即将过期，尝试刷新")
+		return refreshComponentAccessToken()
+	}
+
+	log.Infof("从缓存获取 component_access_token 成功")
+	return tokenInfo.Token, nil
+}
+
+// ============================================================
+// 刷新 component_access_token
+// ============================================================
+func refreshComponentAccessToken() (string, error) {
+	url := "https://api.weixin.qq.com/cgi-bin/component/api_component_token"
+
+	reqBody := map[string]interface{}{
+		"component_appid":         getComponentAppid(),
+		"component_appsecret":     getComponentAppsecret(),
+		"component_verify_ticket": getComponentVerifyTicket(),
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %v", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("调用微信接口失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	var result struct {
+		ErrCode         int    `json:"errcode"`
+		ErrMsg          string `json:"errmsg"`
+		ComponentAccessToken string `json:"component_access_token"`
+		ExpiresIn       int    `json:"expires_in"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %v, body: %s", err, string(body))
+	}
+
+	if result.ErrCode != 0 {
+		log.Errorf("刷新 component_access_token 失败: %d, %s", result.ErrCode, result.ErrMsg)
+		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
+	}
+
+	// 存入 wxtoken 表
+	dbConn := db.Get()
+	if dbConn != nil {
+		expireTime := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+		err = dbConn.Exec(`
+			INSERT INTO wxtoken (type, appid, token, expiretime, createtime, updateTime)
+			VALUES (?, ?, ?, ?, NOW(), NOW())
+		`, TokenTypeComponentAccess, getComponentAppid(), result.ComponentAccessToken, expireTime).Error
+		if err != nil {
+			log.Warnf("缓存 component_access_token 失败: %v", err)
+		}
+	}
+
+	log.Infof("成功刷新 component_access_token")
+	return result.ComponentAccessToken, nil
+}
+
+// ============================================================
+// 获取 component_verify_ticket（从数据库或缓存）
+// ============================================================
+func getComponentVerifyTicket() string {
+	// component_verify_ticket 由微信每 10 分钟推送到 /wxcallback/component
+	// 需要从数据库或缓存中读取最新的 ticket
+
+	dbConn := db.Get()
+	if dbConn == nil {
+		return ""
+	}
+
+	var ticket string
+	err := dbConn.Raw(`
+		SELECT ticket FROM wxcallback_component 
+		ORDER BY id DESC LIMIT 1
+	`).Scan(&ticket).Error
+
+	if err != nil || ticket == "" {
+		log.Warnf("未找到 component_verify_ticket")
+		return ""
+	}
+	return ticket
+}
+
+// ============================================================
+// 获取 authorizer_access_token
+// ============================================================
+func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
+	dbConn := db.Get()
+	if dbConn == nil {
+		return "", fmt.Errorf("数据库连接为空")
+	}
+
+	// 1. 从 wxtoken 表查询缓存的 authorizer_access_token
+	var cachedToken struct {
+		Token      string    `gorm:"column:token"`
+		ExpireTime time.Time `gorm:"column:expiretime"`
+	}
+
+	err := dbConn.Raw(`
+		SELECT token, expiretime 
+		FROM wxtoken 
+		WHERE type = ? AND appid = ?
+		ORDER BY id DESC LIMIT 1
+	`, TokenTypeAuthorizerAccess, authorizerAppid).Scan(&cachedToken).Error
+
+	// 2. 如果缓存有效，直接返回
+	if err == nil && cachedToken.Token != "" && time.Now().Add(5*time.Minute).Before(cachedToken.ExpireTime) {
+		log.Infof("从缓存获取 authorizer_access_token 成功, appid: %s", authorizerAppid)
+		return cachedToken.Token, nil
+	}
+
+	// 3. 缓存无效，从 authorizers 表获取 refreshtoken
+	var refreshTokenInfo struct {
+		RefreshToken string `gorm:"column:refreshtoken"`
+	}
+	err = dbConn.Raw(`
+		SELECT refreshtoken 
+		FROM authorizers 
+		WHERE appid = ?
+	`, authorizerAppid).Scan(&refreshTokenInfo).Error
+
+	if err != nil {
+		return "", fmt.Errorf("获取 authorizer_refresh_token 失败: %v", err)
+	}
+	if refreshTokenInfo.RefreshToken == "" {
+		return "", fmt.Errorf("商户 %s 未授权，请先完成授权流程", authorizerAppid)
+	}
+
+	// 4. 获取 component_access_token
+	componentAccessToken, err := getComponentAccessToken()
+	if err != nil {
+		return "", fmt.Errorf("获取 component_access_token 失败: %v", err)
+	}
+
+	// 5. 调用微信刷新接口
+	url := "https://api.weixin.qq.com/cgi-bin/component/api_authorizer_token"
+
+	reqBody := map[string]interface{}{
+		"component_appid":          getComponentAppid(),
+		"authorizer_appid":         authorizerAppid,
+		"authorizer_refresh_token": refreshTokenInfo.RefreshToken,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %v", err)
+	}
+
+	requestURL := fmt.Sprintf("%s?component_access_token=%s", url, componentAccessToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(requestURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("调用微信刷新接口失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	// 6. 解析响应
+	var result struct {
+		ErrCode               int    `json:"errcode"`
+		ErrMsg                string `json:"errmsg"`
+		AuthorizerAccessToken string `json:"authorizer_access_token"`
+		ExpiresIn             int    `json:"expires_in"`
+		AuthorizerRefreshToken string `json:"authorizer_refresh_token"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %v, body: %s", err, string(body))
+	}
+
+	if result.ErrCode != 0 {
+		log.Errorf("微信刷新 token 失败: %d, %s", result.ErrCode, result.ErrMsg)
+		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
+	}
+
+	// 7. 缓存 authorizer_access_token
+	expireTime := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	err = dbConn.Exec(`
+		INSERT INTO wxtoken (type, appid, token, expiretime, createtime, updateTime)
+		VALUES (?, ?, ?, ?, NOW(), NOW())
+	`, TokenTypeAuthorizerAccess, authorizerAppid, result.AuthorizerAccessToken, expireTime).Error
+
+	if err != nil {
+		log.Warnf("缓存 authorizer_access_token 失败: %v", err)
+	}
+
+	// 8. 如果 refreshtoken 更新了，同步更新 authorizers 表
+	if result.AuthorizerRefreshToken != "" && result.AuthorizerRefreshToken != refreshTokenInfo.RefreshToken {
+		err = dbConn.Exec(`
+			UPDATE authorizers 
+			SET refreshtoken = ?, updatetime = NOW()
+			WHERE appid = ?
+		`, result.AuthorizerRefreshToken, authorizerAppid).Error
+		if err != nil {
+			log.Warnf("更新 refreshtoken 失败: %v", err)
+		}
+	}
+
+	log.Infof("成功刷新 authorizer_access_token, appid: %s", authorizerAppid)
+	return result.AuthorizerAccessToken, nil
+}
+
+// ============================================================
+// 获取微信手机号（通过 code）
+// ============================================================
+func getPhoneNumberByCode(code string, authorizerAppid string) (string, error) {
+	log.Infof("开始换取手机号，code: %s, appid: %s", code, authorizerAppid)
+
+	// 1. 获取 authorizer_access_token
+	authorizerAccessToken, err := getAuthorizerAccessToken(authorizerAppid)
 	if err != nil {
 		log.Errorf("获取 authorizer_access_token 失败: %v", err)
 		return "", fmt.Errorf("获取访问令牌失败: %v", err)
@@ -97,7 +366,7 @@ func getPhoneNumberByCode(code string) (string, error) {
 		return "", fmt.Errorf("微信接口错误(%d): %s", result.ErrCode, result.ErrMsg)
 	}
 
-	// 4. 返回手机号（优先使用 purePhoneNumber，无区号版本）
+	// 4. 返回手机号
 	phoneNumber := result.PhoneInfo.PurePhoneNumber
 	if phoneNumber == "" {
 		phoneNumber = result.PhoneInfo.PhoneNumber
@@ -107,40 +376,19 @@ func getPhoneNumberByCode(code string) (string, error) {
 }
 
 // ============================================================
-// ★★★ 需要你实现：获取 authorizer_access_token ★★★
+// 获取默认商户 AppID（从 authorizers 表）
 // ============================================================
-func getAuthorizerAccessToken() (string, error) {
-	// ⚠️ 警告：此函数需要你根据项目实际情况实现
-
-	// 你的 wxcloudrun-wxcomponent 项目应该有 token 管理机制，
-	// 请参考项目中的 token 获取逻辑来填充此函数。
-
-	// 常见实现方式：
-	// 1. 从缓存（Redis/内存）中读取
-	// 2. 如果缓存不存在，使用 authorizer_refresh_token 刷新
-	// 3. 刷新后存入缓存，返回新 token
-
-	// 示例（需要替换为你的实际代码）：
-	// token, err := cache.Get("authorizer_access_token")
-	// if err == nil && token != "" {
-	//     return token, nil
-	// }
-	// 
-	// refreshToken, err := getRefreshTokenFromDB(appid)
-	// if err != nil {
-	//     return "", err
-	// }
-	// 
-	// newToken, err := refreshAuthorizerToken(refreshToken)
-	// if err != nil {
-	//     return "", err
-	// }
-	// 
-	// cache.Set("authorizer_access_token", newToken, 2*time.Hour)
-	// return newToken, nil
-
-	// 临时返回错误，提示需要实现
-	return "", fmt.Errorf("请实现 getAuthorizerAccessToken 函数")
+func getDefaultAuthorizerAppid() string {
+	dbConn := db.Get()
+	if dbConn == nil {
+		return ""
+	}
+	var appid string
+	err := dbConn.Raw(`SELECT appid FROM authorizers LIMIT 1`).Scan(&appid).Error
+	if err != nil {
+		return ""
+	}
+	return appid
 }
 
 // ============================================================
@@ -156,6 +404,16 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
+	// 获取商户小程序的 AppID（从请求头或使用默认）
+	authorizerAppid := c.GetHeader("X-Appid")
+	if authorizerAppid == "" {
+		authorizerAppid = getDefaultAuthorizerAppid()
+	}
+	if authorizerAppid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少商户 AppID"})
+		return
+	}
+
 	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
@@ -163,7 +421,6 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	// 获取底层 *sql.DB 用于原生查询
 	sqlDB, err := dbConn.DB()
 	if err != nil {
 		log.Errorf("获取数据库连接失败: %v", err)
@@ -171,8 +428,8 @@ func LoginByPhone(c *gin.Context) {
 		return
 	}
 
-	// 1. 调用微信接口获取手机号（现在是真实接口了）
-	phoneNumber, err := getPhoneNumberByCode(req.Code)
+	// 1. 调用微信接口获取手机号
+	phoneNumber, err := getPhoneNumberByCode(req.Code, authorizerAppid)
 	if err != nil {
 		log.Errorf("获取手机号失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"code": 500, "message": "获取手机号失败: " + err.Error()})
@@ -283,10 +540,8 @@ func SetPassword(c *gin.Context) {
 		return
 	}
 
-	// 加密密码
 	hashed := hashPassword(req.Password)
 
-	// 更新用户密码
 	result := dbConn.Exec(`
 		UPDATE user SET password = ?, is_set_password = 1 
 		WHERE phoneNumber = ? OR username = ?
@@ -303,7 +558,6 @@ func SetPassword(c *gin.Context) {
 		return
 	}
 
-	// 查询用户信息
 	var userInfo struct {
 		ID          string  `json:"_id"`
 		Openid      string  `json:"_openid"`
@@ -321,7 +575,6 @@ func SetPassword(c *gin.Context) {
 		return
 	}
 
-	// 生成token
 	token := generateToken(userInfo.ID)
 	expireTime := time.Now().Add(7 * 24 * time.Hour)
 	dbConn.Exec(`
@@ -418,6 +671,11 @@ func VerifyPhoneForReset(c *gin.Context) {
 		return
 	}
 
+	authorizerAppid := c.GetHeader("X-Appid")
+	if authorizerAppid == "" {
+		authorizerAppid = getDefaultAuthorizerAppid()
+	}
+
 	dbConn := db.Get()
 	if dbConn == nil {
 		log.Error("数据库连接为空")
@@ -432,15 +690,13 @@ func VerifyPhoneForReset(c *gin.Context) {
 		return
 	}
 
-	// 获取手机号（也使用真实接口）
-	phoneNumber, err := getPhoneNumberByCode(req.Code)
+	phoneNumber, err := getPhoneNumberByCode(req.Code, authorizerAppid)
 	if err != nil {
 		log.Errorf("获取手机号失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"code": 500, "message": "获取手机号失败"})
 		return
 	}
 
-	// 检查该手机号是否已注册
 	var exists int
 	err = sqlDB.QueryRow(`
 		SELECT COUNT(*) FROM user WHERE phoneNumber = ? OR username = ?
@@ -494,10 +750,8 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// 加密密码
 	hashed := hashPassword(req.Password)
 
-	// 更新密码
 	result := dbConn.Exec(`
 		UPDATE user SET password = ?, is_set_password = 1 
 		WHERE phoneNumber = ? OR username = ?
