@@ -4,7 +4,7 @@ package custom
 import (
 	"bytes"
 	"crypto/sha256"
-	"database/sql" // ★★★ 新增 import ★★★
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,7 +16,6 @@ import (
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/wx/base"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
-	"gorm.io/gorm"
 )
 
 // ============================================================
@@ -564,7 +563,6 @@ func LoginByPhone(c *gin.Context) {
 		Balance       float64 `json:"balance"`
 	}
 
-	// ★★★ 修复：使用 sql.ErrNoRows 判断用户是否存在 ★★★
 	err = sqlDB.QueryRow(`
 		SELECT id, _openid, phoneNumber, nickName, is_set_password, balance 
 		FROM user WHERE phoneNumber = ? OR username = ?
