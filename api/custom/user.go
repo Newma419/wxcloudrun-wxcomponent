@@ -59,7 +59,7 @@ func getComponentAppsecret() string {
 // 获取 component_verify_ticket（从 wxbase 统一读取 + 数据库降级）
 // ============================================================
 func getComponentVerifyTicket() string {
-	// 优先从 wxbase 读取（comm 表 + 15分钟缓存）
+	// ★ 优先从 wxbase 读取（comm 表 + 15分钟缓存）
 	ticket := wxbase.GetTicket()
 	if ticket != "" {
 		log.Infof("从 comm 表获取 component_verify_ticket 成功")
@@ -315,7 +315,7 @@ func getAuthorizerAccessToken(authorizerAppid string) (string, error) {
 }
 
 // ============================================================
-// ★★★ 配置商户小程序隐私协议（含 owner_setting） ★★★
+// ★★★ 配置商户小程序隐私协议 ★★★
 // ============================================================
 func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) error {
 	log.Infof("开始配置隐私协议, appid: %s", authorizerAppid)
@@ -324,11 +324,13 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 
 	reqBody := map[string]interface{}{
 		"privacy_ver": 2,
-		// ★ 添加 owner_setting 字段（必填） ★
+		// ★ 开发者信息（必填）- 已使用你提供的联系方式 ★
 		"owner_setting": map[string]string{
-			"contact_email": "19974995457@163.com", // 替换为你的真实联系邮箱
-			"contact_phone": "19974995457",             // 替换为你的真实联系电话
+			"contact_email": "19974995457@163.com", // 你的邮箱
+			"contact_phone": "19974995457",         // 你的电话
 		},
+		// ★ 用户告知方式（必填） ★
+		"notice_method": "通过弹窗通知用户",
 		"setting_list": []map[string]string{
 			{
 				"privacy_key":  "PhoneNumber",
