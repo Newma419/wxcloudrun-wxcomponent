@@ -3,7 +3,6 @@ package custom
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
@@ -11,13 +10,14 @@ import (
 )
 
 // ============================================================
-// 获取菜品列表
+// 获取菜品详情
 // ============================================================
-func GetDishList(c *gin.Context) {
-	categoryId := c.Query("categoryId")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
-	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
-	status := c.DefaultQuery("status", "1")
+func GetDishDetail(c *gin.Context) {
+	id := c.Query("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少 id 参数"})
+		return
+	}
 
 	dbConn := db.Get()
 	if dbConn == nil {
@@ -26,37 +26,33 @@ func GetDishList(c *gin.Context) {
 		return
 	}
 
-	// 构建查询条件
-	query := dbConn.Table("dish")
-	if categoryId != "" {
-		query = query.Where("category_id = ?", categoryId)
-	}
-	if status != "" {
-		query = query.Where("status = ?", status)
-	}
-
-	// 统计总数
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		log.Errorf("统计菜品总数失败: %v", err)
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"list": []interface{}{}, "total": 0}})
-		return
-	}
-
-	// 查询列表
-	var list []map[string]interface{}
-	err := query.Offset(page * size).Limit(size).Order("sort ASC, id DESC").Find(&list).Error
+	var dish map[string]interface{}
+	err := dbConn.Table("dish").Where("id = ?", id).First(&dish).Error
 	if err != nil {
-		log.Errorf("查询菜品列表失败: %v", err)
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"list": []interface{}{}, "total": 0}})
+		log.Errorf("查询菜品详情失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": 404, "message": "菜品不存在"})
 		return
 	}
+
+	// 查询菜品图片（如果有单独的表）
+	var images []string
+	dbConn.Table("dish_images").Where("dish_id = ?", id).Pluck("image_url", &images)
+
+	// 查询规格（如果有单独的表）
+	var skus []map[string]interface{}
+	dbConn.Table("dish_sku").Where("dish_id = ?", id).Order("sort ASC").Find(&skus)
+
+	// 查询标签（如果有单独的表）
+	var tags []map[string]interface{}
+	dbConn.Table("dish_tag").Where("dish_id = ?", id).Find(&tags)
+
+	// 组装返回数据
+	dish["images"] = images
+	dish["skus"] = skus
+	dish["tags"] = tags
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
-		"data": gin.H{
-			"list":  list,
-			"total": total,
-		},
+		"data": dish,
 	})
 }
