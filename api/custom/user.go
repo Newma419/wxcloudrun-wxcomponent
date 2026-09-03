@@ -16,6 +16,7 @@ import (
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/wx/base"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
+	"gorm.io/gorm" // ★★★ 重新导入 gorm ★★★
 )
 
 // ============================================================
@@ -908,5 +909,53 @@ func ResetPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
 		"message": "密码重置成功",
+	})
+}
+
+// ============================================================
+// ★★★ 新增：6. 获取用户信息 ★★★
+// ============================================================
+func GetUserInfo(c *gin.Context) {
+	openid := c.Query("openid")
+	if openid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少 openid 参数"})
+		return
+	}
+
+	dbConn := db.Get()
+	if dbConn == nil {
+		log.Error("数据库连接为空")
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	var userInfo struct {
+		ID            string  `json:"_id"`
+		Openid        string  `json:"_openid"`
+		PhoneNumber   string  `json:"phoneNumber"`
+		NickName      string  `json:"nickName"`
+		Balance       float64 `json:"balance"`
+		IsSetPassword int     `json:"is_set_password"`
+		CreateTime    string  `json:"createTime"`
+	}
+
+	err := dbConn.Raw(`
+		SELECT id, _openid, phoneNumber, nickName, balance, is_set_password, createTime 
+		FROM user WHERE _openid = ?
+	`, openid).Scan(&userInfo).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusOK, gin.H{"code": 404, "message": "用户不存在"})
+			return
+		}
+		log.Errorf("查询用户失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "系统错误"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": userInfo,
 	})
 }
