@@ -47,6 +47,11 @@ func Init() *gin.Engine {
 		customGroup.POST("/deploy", custom.DeployHandler)
 
 		// ============================================================
+		// ★★★ 测试接口 - 手动配置隐私协议 ★★★
+		// ============================================================
+		customGroup.GET("/setup-privacy", custom.SetupPrivacy)
+
+		// ============================================================
 		// 用户登录相关
 		// ============================================================
 		customGroup.POST("/user/login-phone", custom.LoginByPhone)              // 一键登录
