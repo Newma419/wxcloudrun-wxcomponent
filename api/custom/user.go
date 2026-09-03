@@ -324,7 +324,7 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 			"contact_email": "19974995457@163.com",
 			"contact_phone": "19974995457",
 		},
-		"notice_method": "弹窗通知",
+		"notice_method": "notice_method",
 		"setting_list": []map[string]string{
 			{
 				"privacy_key":  "PhoneNumber",
