@@ -4,6 +4,7 @@ package custom
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql" // ★★★ 新增 import ★★★
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -322,7 +323,7 @@ func setupPrivacySetting(authorizerAccessToken string, authorizerAppid string) e
 			"contact_name":  "智小助科技",
 			"contact_email": "19974995457@163.com",
 			"contact_phone": "19974995457",
-			"notice_method": "公告", // ★★★ 放在 owner_setting 内部 ★★★
+			"notice_method": "公告",
 		},
 		"setting_list": []map[string]string{
 			{
@@ -563,6 +564,7 @@ func LoginByPhone(c *gin.Context) {
 		Balance       float64 `json:"balance"`
 	}
 
+	// ★★★ 修复：使用 sql.ErrNoRows 判断用户是否存在 ★★★
 	err = sqlDB.QueryRow(`
 		SELECT id, _openid, phoneNumber, nickName, is_set_password, balance 
 		FROM user WHERE phoneNumber = ? OR username = ?
@@ -572,7 +574,7 @@ func LoginByPhone(c *gin.Context) {
 	)
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == sql.ErrNoRows {
 			openid := fmt.Sprintf("user_%d", time.Now().UnixNano())
 			result, err := sqlDB.Exec(`
 				INSERT INTO user (_openid, phoneNumber, username, nickName, is_set_password, balance, createTime)
@@ -750,7 +752,7 @@ func CheckToken(c *gin.Context) {
 	)
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == sql.ErrNoRows {
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"valid": false}})
 			return
 		}
