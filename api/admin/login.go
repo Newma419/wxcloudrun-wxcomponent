@@ -42,7 +42,6 @@ func AdminLogin(c *gin.Context) {
 		Role     string `gorm:"column:role"`
 	}
 
-	// 查询管理员
 	err := dbConn.Table("admin").
 		Where("username = ?", req.Username).
 		First(&admin).Error
@@ -52,7 +51,6 @@ func AdminLogin(c *gin.Context) {
 		return
 	}
 
-	// 验证密码（假设密码是 bcrypt 加密的）
 	err = bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password))
 	if err != nil {
 		log.Errorf("密码验证失败: %v", err)
@@ -60,7 +58,6 @@ func AdminLogin(c *gin.Context) {
 		return
 	}
 
-	// 生成 JWT
 	token, err := middleware.GenerateAdminToken(admin.ID, admin.Username, admin.Role)
 	if err != nil {
 		log.Errorf("生成 token 失败: %v", err)
@@ -80,9 +77,4 @@ func AdminLogin(c *gin.Context) {
 		},
 		"message": "登录成功",
 	})
-}
-
-// AdminLogout 管理员登出（可选，前端清除 token 即可）
-func AdminLogout(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "登出成功"})
 }
