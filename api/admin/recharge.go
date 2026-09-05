@@ -3,7 +3,6 @@ package admin
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/db"
