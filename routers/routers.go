@@ -47,6 +47,9 @@ func Init() *gin.Engine {
 	// ============================================================
 	adminGroup := r.Group("/admin")
 	{
+		// ✅ 新增：检查管理员是否首次创建（不需要认证）
+		adminGroup.GET("/check", admin.CheckAdminFirstTime)
+
 		// ---- 登录（不需要认证） ----
 		adminGroup.POST("/login", admin.AdminLogin)
 
