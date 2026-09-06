@@ -1,11 +1,11 @@
 package custom
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"time"
 
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/config"
@@ -22,14 +22,22 @@ type DecryptPhoneResponse struct {
 	PhoneNumber string `json:"phoneNumber"`
 }
 
+// WechatTokenResponse access_token 响应
+type WechatTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	ErrCode     int    `json:"errcode"`
+	ErrMsg      string `json:"errmsg"`
+}
+
 // WechatPhoneResponse 微信手机号接口响应
 type WechatPhoneResponse struct {
-	ErrCode int `json:"errcode"`
-	ErrMsg  string `json:"errmsg"`
+	ErrCode   int    `json:"errcode"`
+	ErrMsg    string `json:"errmsg"`
 	PhoneInfo struct {
-		PhoneNumber string `json:"phoneNumber"`
+		PhoneNumber     string `json:"phoneNumber"`
 		PurePhoneNumber string `json:"purePhoneNumber"`
-		CountryCode string `json:"countryCode"`
+		CountryCode     string `json:"countryCode"`
 	} `json:"phone_info"`
 }
 
@@ -133,8 +141,6 @@ func getAccessToken() (string, error) {
 		return "", fmt.Errorf("appid 或 appsecret 未配置")
 	}
 
-	// 这里可以加缓存，避免每次请求都获取
-	// 简单实现：直接获取
 	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)
 
 	resp, err := http.Get(url)
@@ -148,13 +154,7 @@ func getAccessToken() (string, error) {
 		return "", err
 	}
 
-	var result struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-		ErrCode     int    `json:"errcode"`
-		ErrMsg      string `json:"errmsg"`
-	}
-
+	var result WechatTokenResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
