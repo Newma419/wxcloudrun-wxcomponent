@@ -148,6 +148,10 @@ func Init() *gin.Engine {
 		customGroup.GET("/coupon/admin/list", custom.GetAdminCouponList)
 		customGroup.POST("/coupon/admin/save", custom.SaveCoupon)
 		customGroup.POST("/coupon/admin/delete", custom.DeleteCoupon)
+
+		// ---- 手机号解密 ----
+        customGroup.POST("/user/decrypt-phone", custom.DecryptPhone)
+        customGroup.POST("/user/save-profile", custom.SaveProfile)
 	}
 
 	// ============================================================
