@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 
-	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/config"   // ← 修正这里
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
 	"github.com/gin-gonic/gin"
 )
@@ -128,17 +128,12 @@ func DecryptPhone(c *gin.Context) {
 
 // getAccessToken 获取微信 access_token
 func getAccessToken() (string, error) {
-	// 从配置中读取 appid 和 secret
-	cfg := config.Get()
-	if cfg == nil {
-		return "", fmt.Errorf("配置未初始化")
-	}
-
-	appID := cfg.Wechat.AppID
-	appSecret := cfg.Wechat.AppSecret
+	// ★★★ 直接从环境变量读取 ★★★
+	appID := os.Getenv("WECHAT_APPID")
+	appSecret := os.Getenv("WECHAT_APPSECRET")
 
 	if appID == "" || appSecret == "" {
-		return "", fmt.Errorf("appid 或 appsecret 未配置")
+		return "", fmt.Errorf("环境变量 WECHAT_APPID 或 WECHAT_APPSECRET 未设置")
 	}
 
 	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)
