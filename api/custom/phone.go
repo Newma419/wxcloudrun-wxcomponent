@@ -7,8 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/config"   // ← 修正这里
 	"github.com/WeixinCloud/wxcloudrun-wxcomponent/comm/log"
-	"github.com/WeixinCloud/wxcloudrun-wxcomponent/config"
 	"github.com/gin-gonic/gin"
 )
 
